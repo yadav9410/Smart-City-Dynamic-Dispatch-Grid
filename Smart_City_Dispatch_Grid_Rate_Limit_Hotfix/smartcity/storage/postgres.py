@@ -26,7 +26,7 @@ from smartcity.safety import normalize_report_text
 
 MAX_REPORT_CHARS = 3000
 MAX_LOCATION_LABEL_CHARS = 250
-CONNECT_TIMEOUT_SECONDS = 10
+CONNECT_TIMEOUT_SECONDS = 30
 
 VALID_INPUT_METHODS = frozenset({"text", "voice_transcription"})
 VALID_LOCATION_SOURCES = frozenset({"none", "gps", "manual"})
@@ -87,10 +87,16 @@ def _connect():
             "PostgreSQL driver missing. Install requirements.txt (psycopg[binary])."
         ) from exc
 
+    # Do not pass libpq's ``options`` startup parameter here. Neon pooled URLs
+    # route through PgBouncer, which rejects untracked startup options such as
+    # statement_timeout and idle_in_transaction_session_timeout. That rejection
+    # surfaces from psycopg as OperationalError (often without a SQLSTATE), causing
+    # the fail-closed rate limiter to block every protected action.
+    # Keep the connection handshake timeout at 30s to accommodate a waking Neon
+    # compute. All SQL in this module is short, parameterized application work.
     return psycopg.connect(
         _database_url(),
         connect_timeout=CONNECT_TIMEOUT_SECONDS,
-        options="-c statement_timeout=10000 -c idle_in_transaction_session_timeout=10000",
         row_factory=dict_row,
     )
 
